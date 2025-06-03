@@ -1,0 +1,738 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aplicación WebGL2 con Cargador OBJ</title>
+    <style>
+        body { 
+            margin: 0; 
+            overflow: hidden; 
+            font-family: Arial, sans-serif;
+        }
+        #canvas { 
+            display: block; 
+            width: 100%; 
+            height: 100%; 
+        }
+        #menu {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background-color: rgba(255, 255, 255, 0.8);
+            padding: 10px;
+            border-radius: 5px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.2);
+            z-index: 100;
+        }
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 20px;
+            border-radius: 5px;
+            display: none;
+        }
+        .menu-section {
+            margin-bottom: 10px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #ccc;
+        }
+        .menu-section:last-child {
+            border-bottom: none;
+        }
+        label {
+            display: block;
+            margin: 5px 0;
+        }
+        select, button, input {
+            width: 100%;
+            margin-bottom: 5px;
+        }
+        h3 {
+            margin: 5px 0;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <div id="menu">
+        <div class="menu-section">
+            <h3>Cargar Modelo OBJ</h3>
+            <input type="file" id="obj-file" accept=".obj">
+			
+           <!--  <button id="load-example">Cargar Ejemplo</button> -->
+			
+        </div>
+        
+        <div class="menu-section">
+            <h3>Estilo de Renderizado</h3>
+            <select id="render-style">
+                <option value="solid">Sólido</option>
+                <option value="wireframe">Malla</option>
+                <option value="points">Puntos</option>
+                <option value="textured">Texturizado</option>
+            </select>
+        </div>
+        
+        <div class="menu-section">
+            <h3>Color</h3>
+            <label>
+                R: <input type="range" id="color-r" min="0" max="255" value="200">
+            </label>
+            <label>
+                G: <input type="range" id="color-g" min="0" max="255" value="100">
+            </label>
+            <label>
+                B: <input type="range" id="color-b" min="0" max="255" value="50">
+            </label>
+        </div>
+        
+        <div class="menu-section">
+            <h3>Iluminación</h3>
+            <label>
+                Intensidad: <input type="range" id="light-intensity" min="0" max="2" step="0.1" value="1">
+            </label>
+            <label>
+                Dirección X: <input type="range" id="light-x" min="-1" max="1" step="0.1" value="0.5">
+            </label>
+            <label>
+                Dirección Y: <input type="range" id="light-y" min="-1" max="1" step="0.1" value="0.5">
+            </label>
+            <label>
+                Dirección Z: <input type="range" id="light-z" min="-1" max="1" step="0.1" value="0.5">
+            </label>
+        </div>
+        
+        <button id="reset-camera">Reiniciar Cámara</button>
+    </div>
+
+    <div id="loading">Cargando modelo...</div>
+
+    <script type="module">
+        // Variables globales
+        let gl;
+        let canvas;
+        let program;
+        let currentModel = null;
+        let camera = {
+            distance: 5,
+            rotationX: 0,
+            rotationY: 0
+        };
+        let mouse = {
+            x: 0,
+            y: 0,
+            isDown: false
+        };
+        let renderStyle = 'solid';
+        let baseColor = [0.8, 0.4, 0.2];
+        let lightDirection = [0.5, 0.5, 0.5];
+        let lightIntensity = 1.0;
+        let texture;
+
+        // Shaders
+        const vertexShaderSource = `#version 300 es
+        in vec3 aPosition;
+        in vec3 aNormal;
+        in vec2 aTexCoord;
+        
+        uniform mat4 uModelViewMatrix;
+        uniform mat4 uProjectionMatrix;
+        uniform mat3 uNormalMatrix;
+        
+        out vec3 vNormal;
+        out vec3 vPosition;
+        out vec2 vTexCoord;
+        
+        void main() {
+            gl_Position = uProjectionMatrix * uModelViewMatrix * vec4(aPosition, 1.0);
+            vNormal = uNormalMatrix * aNormal;
+            vPosition = vec3(uModelViewMatrix * vec4(aPosition, 1.0));
+            vTexCoord = aTexCoord;
+        }`;
+
+        const fragmentShaderSource = `#version 300 es
+        precision highp float;
+        
+        in vec3 vNormal;
+        in vec3 vPosition;
+        in vec2 vTexCoord;
+        
+        uniform vec3 uBaseColor;
+        uniform vec3 uLightDirection;
+        uniform float uLightIntensity;
+        uniform bool uUseTexture;
+        uniform sampler2D uTexture;
+        uniform int uRenderStyle;
+        
+        out vec4 fragColor;
+        
+        void main() {
+            if (uRenderStyle == 1) { // Wireframe
+                fragColor = vec4(uBaseColor, 1.0);
+                return;
+            }
+            
+            if (uRenderStyle == 2) { // Points
+                fragColor = vec4(uBaseColor, 1.0);
+                return;
+            }
+            
+            vec3 normal = normalize(vNormal);
+            vec3 lightDir = normalize(uLightDirection);
+            
+            // Iluminación difusa simple
+            float diff = max(dot(normal, lightDir), 0.0);
+            vec3 diffuse = diff * uBaseColor * uLightIntensity;
+            
+            // Iluminación ambiental
+            vec3 ambient = 0.2 * uBaseColor;
+            
+            // Combinar
+            vec3 color = ambient + diffuse;
+            
+            if (uUseTexture) {
+                vec4 texColor = texture(uTexture, vTexCoord);
+                color *= texColor.rgb;
+            }
+            
+            fragColor = vec4(color, 1.0);
+        }`;
+
+        // Inicialización
+        async function init() {
+            canvas = document.getElementById('canvas');
+            gl = canvas.getContext('webgl2');
+            if (!gl) {
+                alert('WebGL2 no está disponible en tu navegador');
+                return;
+            }
+
+            // Ajustar tamaño del canvas
+            resizeCanvas();
+            window.addEventListener('resize', resizeCanvas);
+
+            // Configurar eventos del ratón
+            setupMouseEvents();
+
+            // Configurar menú
+            setupMenu();
+
+            // Compilar shaders y crear programa
+            program = createProgram(vertexShaderSource, fragmentShaderSource);
+
+            // Cargar textura
+            await loadTexture();
+
+            // Iniciar bucle de renderizado
+            requestAnimationFrame(render);
+        }
+
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            gl.viewport(0, 0, canvas.width, canvas.height);
+        }
+
+        function setupMouseEvents() {
+            canvas.addEventListener('mousedown', (e) => {
+                mouse.isDown = true;
+                mouse.x = e.clientX;
+                mouse.y = e.clientY;
+            });
+
+            canvas.addEventListener('mouseup', () => {
+                mouse.isDown = false;
+            });
+
+            canvas.addEventListener('mousemove', (e) => {
+                if (mouse.isDown) {
+                    const dx = e.clientX - mouse.x;
+                    const dy = e.clientY - mouse.y;
+                    
+                    camera.rotationY += dx * 0.01;
+                    camera.rotationX += dy * 0.01;
+                    
+                    mouse.x = e.clientX;
+                    mouse.y = e.clientY;
+                }
+            });
+
+            canvas.addEventListener('wheel', (e) => {
+                camera.distance += e.deltaY * 0.01;
+                camera.distance = Math.max(1, Math.min(20, camera.distance));
+                e.preventDefault();
+            });
+        }
+
+        function setupMenu() {
+            document.getElementById('obj-file').addEventListener('change', (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    loadOBJModel(file);
+                }
+            });
+/*
+            document.getElementById('load-example').addEventListener('click', () => {
+                loadExampleModel();
+            });
+*/
+            document.getElementById('render-style').addEventListener('change', (e) => {
+                renderStyle = e.target.value;
+            });
+
+            document.getElementById('color-r').addEventListener('input', updateColor);
+            document.getElementById('color-g').addEventListener('input', updateColor);
+            document.getElementById('color-b').addEventListener('input', updateColor);
+
+            document.getElementById('light-intensity').addEventListener('input', (e) => {
+                lightIntensity = parseFloat(e.target.value);
+            });
+
+            document.getElementById('light-x').addEventListener('input', updateLightDirection);
+            document.getElementById('light-y').addEventListener('input', updateLightDirection);
+            document.getElementById('light-z').addEventListener('input', updateLightDirection);
+
+            document.getElementById('reset-camera').addEventListener('click', () => {
+                camera.distance = 5;
+                camera.rotationX = 0;
+                camera.rotationY = 0;
+            });
+        }
+
+        function updateColor() {
+            const r = parseInt(document.getElementById('color-r').value) / 255;
+            const g = parseInt(document.getElementById('color-g').value) / 255;
+            const b = parseInt(document.getElementById('color-b').value) / 255;
+            baseColor = [r, g, b];
+        }
+
+        function updateLightDirection() {
+            const x = parseFloat(document.getElementById('light-x').value);
+            const y = parseFloat(document.getElementById('light-y').value);
+            const z = parseFloat(document.getElementById('light-z').value);
+            lightDirection = [x, y, z];
+        }
+
+        function showLoading(show) {
+            document.getElementById('loading').style.display = show ? 'block' : 'none';
+        }
+
+        async function loadOBJModel(file) {
+            showLoading(true);
+            
+            const reader = new FileReader();
+            reader.onload = async (e) => {
+                const objText = e.target.result;
+                const objData = parseOBJ(objText);
+                createModelFromOBJData(objData);
+                showLoading(false);
+            };
+            reader.readAsText(file);
+        }
+
+        async function loadExampleModel() {
+            showLoading(true);
+            
+            try {
+                // Ejemplo: Cargar un modelo de mono de Stanford Bunny
+                const response = await fetch('https://raw.githubusercontent.com/pichiliani/ModelsOBJ/refs/heads/master/totem.obj');
+                const objText = await response.text();
+                const objData = parseOBJ(objText);
+                createModelFromOBJData(objData);
+            } catch (error) {
+                console.error('Error al cargar el modelo de ejemplo:', error);
+                // Crear una esfera como fallback
+                currentModel = createSphere(1.0, 32, 16);
+            }
+            
+            showLoading(false);
+        }
+
+        function parseOBJ(text) {
+            const vertices = [];
+            const normals = [];
+            const texcoords = [];
+            const faces = [];
+            
+            const lines = text.split('\n');
+            for (const line of lines) {
+                const parts = line.trim().split(/\s+/);
+                if (parts.length === 0) continue;
+                
+                const keyword = parts[0];
+                const data = parts.slice(1);
+                
+                switch (keyword) {
+                    case 'v':
+                        vertices.push(data.map(parseFloat));
+                        break;
+                    case 'vn':
+                        normals.push(data.map(parseFloat));
+                        break;
+                    case 'vt':
+                        texcoords.push(data.map(parseFloat));
+                        break;
+                    case 'f':
+                        const face = [];
+                        for (const part of data) {
+                            const indices = part.split('/').map(i => i ? parseInt(i) - 1 : -1);
+                            face.push(indices);
+                        }
+                        faces.push(face);
+                        break;
+                }
+            }
+            
+            return { vertices, normals, texcoords, faces };
+        }
+
+        function createModelFromOBJData(objData) {
+            const { vertices, normals, texcoords, faces } = objData;
+            
+            // Preparar buffers para WebGL
+            const positions = [];
+            const normalsBuffer = [];
+            const texcoordsBuffer = [];
+            const indices = [];
+            let index = 0;
+            const indexMap = new Map();
+            
+            for (const face of faces) {
+                for (let i = 0; i < face.length; i++) {
+                    const [vIdx, tIdx, nIdx] = face[i];
+                    const key = `${vIdx}/${tIdx}/${nIdx}`;
+                    
+                    if (indexMap.has(key)) {
+                        indices.push(indexMap.get(key));
+                    } else {
+                        // Posición
+                        if (vIdx >= 0 && vIdx < vertices.length) {
+                            positions.push(...vertices[vIdx]);
+                        } else {
+                            positions.push(0, 0, 0);
+                        }
+                        
+                        // Normal
+                        if (nIdx >= 0 && nIdx < normals.length) {
+                            normalsBuffer.push(...normals[nIdx]);
+                        } else {
+                            normalsBuffer.push(0, 1, 0);
+                        }
+                        
+                        // Coordenadas de textura
+                        if (tIdx >= 0 && tIdx < texcoords.length) {
+                            texcoordsBuffer.push(...texcoords[tIdx]);
+                        } else {
+                            texcoordsBuffer.push(0, 0);
+                        }
+                        
+                        indices.push(index);
+                        indexMap.set(key, index);
+                        index++;
+                    }
+                }
+            }
+            
+            const model = {
+                vao: gl.createVertexArray(),
+                indexBuffer: gl.createBuffer(),
+                positionBuffer: gl.createBuffer(),
+                normalBuffer: gl.createBuffer(),
+                texCoordBuffer: gl.createBuffer(),
+                indexCount: indices.length
+            };
+            
+            gl.bindVertexArray(model.vao);
+            
+            // Configurar búfer de posiciones
+            gl.bindBuffer(gl.ARRAY_BUFFER, model.positionBuffer);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
+            gl.enableVertexAttribArray(0);
+            gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
+            
+            // Configurar búfer de normales
+            gl.bindBuffer(gl.ARRAY_BUFFER, model.normalBuffer);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(normalsBuffer), gl.STATIC_DRAW);
+            gl.enableVertexAttribArray(1);
+            gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 0, 0);
+            
+            // Configurar búfer de coordenadas de textura
+            if (texcoordsBuffer.length > 0) {
+                gl.bindBuffer(gl.ARRAY_BUFFER, model.texCoordBuffer);
+                gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(texcoordsBuffer), gl.STATIC_DRAW);
+                gl.enableVertexAttribArray(2);
+                gl.vertexAttribPointer(2, 2, gl.FLOAT, false, 0, 0);
+            } else {
+                // Si no hay coordenadas de textura, llenar con ceros
+                const emptyTexCoords = new Float32Array(positions.length / 3 * 2).fill(0);
+                gl.bindBuffer(gl.ARRAY_BUFFER, model.texCoordBuffer);
+                gl.bufferData(gl.ARRAY_BUFFER, emptyTexCoords, gl.STATIC_DRAW);
+                gl.enableVertexAttribArray(2);
+                gl.vertexAttribPointer(2, 2, gl.FLOAT, false, 0, 0);
+            }
+            
+            // Configurar búfer de índices
+            gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, model.indexBuffer);
+            gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint32Array(indices), gl.STATIC_DRAW);
+            
+            gl.bindVertexArray(null);
+            
+            currentModel = model;
+            return model;
+        }
+
+        function createSphere(radius, widthSegments, heightSegments) {
+            const positions = [];
+            const normals = [];
+            const texcoords = [];
+            const indices = [];
+            
+            for (let y = 0; y <= heightSegments; y++) {
+                const v = y / heightSegments;
+                const phi = v * Math.PI;
+                
+                for (let x = 0; x <= widthSegments; x++) {
+                    const u = x / widthSegments;
+                    const theta = u * Math.PI * 2;
+                    
+                    const px = radius * Math.sin(phi) * Math.cos(theta);
+                    const py = radius * Math.cos(phi);
+                    const pz = radius * Math.sin(phi) * Math.sin(theta);
+                    
+                    positions.push(px, py, pz);
+                    normals.push(px / radius, py / radius, pz / radius);
+                    texcoords.push(u, 1 - v);
+                }
+            }
+            
+            for (let y = 0; y < heightSegments; y++) {
+                for (let x = 0; x < widthSegments; x++) {
+                    const a = y * (widthSegments + 1) + x;
+                    const b = a + 1;
+                    const c = (y + 1) * (widthSegments + 1) + x;
+                    const d = c + 1;
+                    
+                    if (y !== 0) {
+                        indices.push(a, c, b);
+                    }
+                    if (y !== heightSegments - 1) {
+                        indices.push(b, c, d);
+                    }
+                }
+            }
+            
+            const model = {
+                vao: gl.createVertexArray(),
+                indexBuffer: gl.createBuffer(),
+                positionBuffer: gl.createBuffer(),
+                normalBuffer: gl.createBuffer(),
+                texCoordBuffer: gl.createBuffer(),
+                indexCount: indices.length
+            };
+            
+            gl.bindVertexArray(model.vao);
+            
+            // Configurar búfer de posiciones
+            gl.bindBuffer(gl.ARRAY_BUFFER, model.positionBuffer);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
+            gl.enableVertexAttribArray(0);
+            gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
+            
+            // Configurar búfer de normales
+            gl.bindBuffer(gl.ARRAY_BUFFER, model.normalBuffer);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(normals), gl.STATIC_DRAW);
+            gl.enableVertexAttribArray(1);
+            gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 0, 0);
+            
+            // Configurar búfer de coordenadas de textura
+            gl.bindBuffer(gl.ARRAY_BUFFER, model.texCoordBuffer);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(texcoords), gl.STATIC_DRAW);
+            gl.enableVertexAttribArray(2);
+            gl.vertexAttribPointer(2, 2, gl.FLOAT, false, 0, 0);
+            
+            // Configurar búfer de índices
+            gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, model.indexBuffer);
+            gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint32Array(indices), gl.STATIC_DRAW);
+            
+            gl.bindVertexArray(null);
+            
+            currentModel = model;
+            return model;
+        }
+
+        async function loadTexture() {
+            // Crear una textura de damero simple
+            texture = gl.createTexture();
+            gl.bindTexture(gl.TEXTURE_2D, texture);
+            
+            const level = 0;
+            const internalFormat = gl.RGBA;
+            const width = 2;
+            const height = 2;
+            const format = gl.RGBA;
+            const type = gl.UNSIGNED_BYTE;
+            const pixels = new Uint8Array([
+                255, 255, 255, 255,   0,   0,   0, 255,
+                  0,   0,   0, 255, 255, 255, 255, 255
+            ]);
+            
+            gl.texImage2D(gl.TEXTURE_2D, level, internalFormat, width, height, 0, format, type, pixels);
+            
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+        }
+
+        function createProgram(vertexShaderSource, fragmentShaderSource) {
+            const vertexShader = compileShader(gl.VERTEX_SHADER, vertexShaderSource);
+            const fragmentShader = compileShader(gl.FRAGMENT_SHADER, fragmentShaderSource);
+            
+            const program = gl.createProgram();
+            gl.attachShader(program, vertexShader);
+            gl.attachShader(program, fragmentShader);
+            gl.linkProgram(program);
+            
+            if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+                console.error('Error al enlazar el programa:', gl.getProgramInfoLog(program));
+                gl.deleteProgram(program);
+                return null;
+            }
+            
+            return program;
+        }
+
+        function compileShader(type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+            
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                console.error('Error al compilar el shader:', gl.getShaderInfoLog(shader));
+                gl.deleteShader(shader);
+                return null;
+            }
+            
+            return shader;
+        }
+
+       function render() {
+    // Limpiar el canvas
+    gl.clearColor(0.1, 0.1, 0.1, 1.0);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    gl.enable(gl.DEPTH_TEST);
+
+    if (!currentModel) {
+        requestAnimationFrame(render);
+        return;
+    }
+
+    // Usar el programa de shaders
+    gl.useProgram(program);
+
+    // Configurar matriz de proyección
+    const aspect = canvas.width / canvas.height;
+    const projectionMatrix = mat4.create();
+    mat4.perspective(projectionMatrix, Math.PI / 4, aspect, 0.1, 100.0);
+
+    // Configurar matriz de vista/modelo
+    const modelViewMatrix = mat4.create();
+    mat4.translate(modelViewMatrix, modelViewMatrix, [0, 0, -camera.distance]);
+    mat4.rotateX(modelViewMatrix, modelViewMatrix, camera.rotationX);
+    mat4.rotateY(modelViewMatrix, modelViewMatrix, camera.rotationY);
+
+    // Configurar matriz normal
+    const normalMatrix = mat3.create();
+    mat3.normalFromMat4(normalMatrix, modelViewMatrix);
+
+    // Pasar matrices a los shaders
+    gl.uniformMatrix4fv(
+        gl.getUniformLocation(program, 'uProjectionMatrix'),
+        false,
+        projectionMatrix
+    );
+    gl.uniformMatrix4fv(
+        gl.getUniformLocation(program, 'uModelViewMatrix'),
+        false,
+        modelViewMatrix
+    );
+    gl.uniformMatrix3fv(
+        gl.getUniformLocation(program, 'uNormalMatrix'),
+        false,
+        normalMatrix
+    );
+
+    // Pasar parámetros de renderizado
+    gl.uniform3fv(gl.getUniformLocation(program, 'uBaseColor'), baseColor);
+    gl.uniform3fv(gl.getUniformLocation(program, 'uLightDirection'), lightDirection);
+    gl.uniform1f(gl.getUniformLocation(program, 'uLightIntensity'), lightIntensity);
+    
+    // Configurar estilo de renderizado
+    let renderStyleValue;
+    switch (renderStyle) {
+        case 'wireframe':
+            renderStyleValue = 1;
+            gl.enable(gl.POLYGON_OFFSET_FILL);
+            gl.polygonOffset(1.0, 1.0);
+            break;
+        case 'points':
+            renderStyleValue = 2;
+            break;
+        default:
+            renderStyleValue = 0;
+    }
+    
+    gl.uniform1i(gl.getUniformLocation(program, 'uRenderStyle'), renderStyleValue);
+    
+    // Configurar textura
+    gl.uniform1i(gl.getUniformLocation(program, 'uUseTexture'), renderStyle === 'textured' ? 1 : 0);
+    if (renderStyle === 'textured') {
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, texture);
+        gl.uniform1i(gl.getUniformLocation(program, 'uTexture'), 0);
+    }
+    
+    // Dibujar el modelo
+    gl.bindVertexArray(currentModel.vao);
+    
+    // Dibujar sólido (si no es solo wireframe o puntos)
+    if (renderStyle !== 'wireframe' && renderStyle !== 'points') {
+        gl.drawElements(gl.TRIANGLES, currentModel.indexCount, gl.UNSIGNED_INT, 0);
+    }
+    
+    // Dibujar wireframe si está seleccionado
+    if (renderStyle === 'wireframe') {
+        gl.uniform3f(gl.getUniformLocation(program, 'uBaseColor'), 0, 0, 0); // Color negro para el wireframe
+        gl.drawElements(gl.LINES, currentModel.indexCount, gl.UNSIGNED_INT, 0);
+    }
+    
+    // Dibujar puntos si está seleccionado
+    if (renderStyle === 'points') {
+        gl.uniform3f(gl.getUniformLocation(program, 'uBaseColor'), 1, 1, 1); // Color blanco para los puntos
+        gl.drawElements(gl.POINTS, currentModel.indexCount, gl.UNSIGNED_INT, 0);
+    }
+    
+    gl.bindVertexArray(null);
+    
+    requestAnimationFrame(render);
+}
+
+        // Iniciar la aplicación
+        window.onload = init;
+    </script>
+    <script type="module">
+  import * as glMatrix from 'https://cdn.jsdelivr.net/npm/gl-matrix@3.4.1/+esm';
+  import { mat4, mat3, vec3 } from 'https://cdn.jsdelivr.net/npm/gl-matrix@3.4.1/+esm';
+  
+  // Ahora puedes usar mat4, mat3, etc. en tu código
+  window.mat4 = mat4;
+  window.mat3 = mat3;
+  window.vec3 = vec3;
+</script>
+</body>
+</html>

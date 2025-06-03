@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Tenis 2D con Texturas</title>
+    <style>
+        canvas { display: block; margin: auto; background: #222; }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas" width="800" height="400"></canvas>
+    <img id="raquetaImg" src="raqueta.svg" hidden>
+    <img id="pelotaImg" src="pelota.png" hidden>
+    <img id="fondoImg" src="tabla.png" hidden>
+    <audio id="bounceSound" src="tenis.wav"></audio>
+    <script>
+        const canvas = document.getElementById("gameCanvas");
+        const ctx = canvas.getContext("2d");
+        const sound = document.getElementById("bounceSound");
+        const raquetaImg = document.getElementById("raquetaImg");
+        const pelotaImg = document.getElementById("pelotaImg");
+        const fondoImg = document.getElementById("fondoImg");
+
+        let raqueta1Y = canvas.height / 2 - 50;
+        let raqueta2Y = canvas.height / 2 - 50;
+        let pelotaX = canvas.width / 2, pelotaY = canvas.height / 2;
+        let pelotaVelX = 4, pelotaVelY = 2;
+        let raqueta1VelY = 0, raqueta2VelY = 0;
+
+        // **Eventos para mover las raquetas**
+        document.addEventListener("keydown", (event) => {
+            if (event.key === "ArrowUp") raqueta1VelY = -5;
+            if (event.key === "ArrowDown") raqueta1VelY = 5;
+            if (event.key === "w") raqueta2VelY = -5;
+            if (event.key === "s") raqueta2VelY = 5;
+        });
+
+        document.addEventListener("keyup", (event) => {
+            if (event.key === "ArrowUp" || event.key === "ArrowDown") raqueta1VelY = 0;
+            if (event.key === "w" || event.key === "s") raqueta2VelY = 0;
+        });
+
+        function actualizarJuego() {
+            // Mover las raquetas
+            raqueta1Y += raqueta1VelY;
+            raqueta2Y += raqueta2VelY;
+            raqueta1Y = Math.max(0, Math.min(canvas.height - 100, raqueta1Y));
+            raqueta2Y = Math.max(0, Math.min(canvas.height - 100, raqueta2Y));
+
+            // Mover la pelota
+            pelotaX += pelotaVelX;
+            pelotaY += pelotaVelY;
+
+            // Rebote contra los bordes
+            if (pelotaY <= 0 || pelotaY >= canvas.height) {
+                pelotaVelY *= -1;
+                sound.play();
+            }
+
+            // Colisión con la raqueta 1
+            if (pelotaX <= 30 && pelotaY > raqueta1Y && pelotaY < raqueta1Y + 100) {
+                pelotaVelX *= -1;
+                sound.play();
+            }
+
+            // Colisión con la raqueta 2
+            if (pelotaX >= canvas.width - 30 && pelotaY > raqueta2Y && pelotaY < raqueta2Y + 100) {
+                pelotaVelX *= -1;
+                sound.play();
+            }
+
+            // Reiniciar si la pelota sale
+            if (pelotaX < 0 || pelotaX > canvas.width) {
+                pelotaX = canvas.width / 2;
+                pelotaY = canvas.height / 2;
+                pelotaVelX = 4;
+                pelotaVelY = 2;
+            }
+        }
+
+        function dibujar() {
+            // Dibujar el fondo
+            ctx.drawImage(fondoImg, 0, 0, canvas.width, canvas.height);
+
+            // Dibujar raquetas
+            ctx.drawImage(raquetaImg, 10, raqueta1Y, 20, 100);
+            ctx.drawImage(raquetaImg, canvas.width - 30, raqueta2Y, 20, 100);
+
+            // Dibujar pelota
+            ctx.drawImage(pelotaImg, pelotaX - 10, pelotaY - 10, 20, 20);
+        }
+
+        function bucleJuego() {
+            actualizarJuego();
+            dibujar();
+            requestAnimationFrame(bucleJuego);
+        }
+
+        bucleJuego();
+    </script>
+</body>
+</html>

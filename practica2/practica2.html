@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Juego de Damas Interactivo</title>
+    <style>
+        canvas { display: block; background-color: #eee; margin: auto; border: 2px solid black; }
+    </style>
+</head>
+<body>
+    <canvas id="canvas" width="600" height="600"></canvas>
+    <script>
+        const canvas = document.getElementById("canvas");
+        const ctx = canvas.getContext("2d");
+        const filas = 8, columnas = 8, tamanoCasilla = 75;
+        let tablero = [];
+        let piezaSeleccionada = null;
+        let turno = "rojo";
+
+        // **Inicializar tablero con piezas**
+        function inicializarTablero() {
+            for (let fila = 0; fila < filas; fila++) {
+                tablero[fila] = [];
+                for (let columna = 0; columna < columnas; columna++) {
+                    tablero[fila][columna] = null;
+                    if (fila < 3 && (fila + columna) % 2 === 1) {
+                        tablero[fila][columna] = "rojo";
+                    } else if (fila > 4 && (fila + columna) % 2 === 1) {
+                        tablero[fila][columna] = "negro";
+                    }
+                }
+            }
+        }
+
+        // **Dibujar tablero**
+        function dibujarTablero() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            for (let fila = 0; fila < filas; fila++) {
+                for (let columna = 0; columna < columnas; columna++) {
+                    ctx.fillStyle = (fila + columna) % 2 === 0 ? "#bbb" : "#444";
+                    ctx.fillRect(columna * tamanoCasilla, fila * tamanoCasilla, tamanoCasilla, tamanoCasilla);
+                    if (tablero[fila][columna]) {
+                        dibujarPieza(columna, fila, tablero[fila][columna]);
+                    }
+                }
+            }
+        }
+
+        // **Dibujar una pieza en una casilla**
+        function dibujarPieza(columna, fila, color) {
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.arc(columna * tamanoCasilla + tamanoCasilla / 2, fila * tamanoCasilla + tamanoCasilla / 2, tamanoCasilla / 3, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = "#000";
+            ctx.stroke();
+        }
+
+        // **Obtener la casilla según coordenadas del mouse**
+        function obtenerCasilla(x, y) {
+            return {
+                columna: Math.floor(x / tamanoCasilla),
+                fila: Math.floor(y / tamanoCasilla)
+            };
+        }
+
+        // **Seleccionar una pieza**
+        canvas.addEventListener("mousedown", (event) => {
+            let { columna, fila } = obtenerCasilla(event.clientX - canvas.offsetLeft, event.clientY - canvas.offsetTop);
+            if (tablero[fila][columna] === turno) {
+                piezaSeleccionada = { fila, columna, color: tablero[fila][columna] };
+            }
+        });
+
+        // **Mover la pieza**
+        canvas.addEventListener("mouseup", (event) => {
+            if (!piezaSeleccionada) return;
+            let { columna, fila } = obtenerCasilla(event.clientX - canvas.offsetLeft, event.clientY - canvas.offsetTop);
+            
+            // Verificar movimiento válido
+            let dx = Math.abs(columna - piezaSeleccionada.columna);
+            let dy = Math.abs(fila - piezaSeleccionada.fila);
+            if (dx === 1 && dy === 1 && tablero[fila][columna] === null) {
+                tablero[fila][columna] = piezaSeleccionada.color;
+                tablero[piezaSeleccionada.fila][piezaSeleccionada.columna] = null;
+                turno = turno === "rojo" ? "negro" : "rojo"; // Cambiar turno
+            }
+
+            piezaSeleccionada = null;
+            dibujarTablero();
+        });
+
+        // **Inicializar juego**
+        inicializarTablero();
+        dibujarTablero();
+    </script>
+</body>
+</html>
